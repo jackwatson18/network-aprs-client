@@ -2,9 +2,13 @@ package main
 
 import (
 	"fmt"
+	"log"
 	"net"
+	"os"
 	"strings"
 )
+
+var AX25_SSID_BITMASK byte = 0xf
 
 type AX25_Address struct {
 	callsign string
@@ -33,7 +37,7 @@ func ParseAX25Address(raw []byte) AX25_Address {
 	}
 
 	call := strings.TrimSpace(string(output[0:6]))
-	address := AX25_Address{callsign: call, Ssid: uint8(output[6] & 0xf)}
+	address := AX25_Address{callsign: call, Ssid: uint8(output[6] & AX25_SSID_BITMASK)}
 	// Only part of the last byte refers to the address/SSID. The funky bitmasking above makes sure we only care about the last bits.
 
 	return address
@@ -56,23 +60,50 @@ func ParseAX25(raw_frame []byte) AX25_struct {
 		frame = frame[7:]
 	}
 	ax.raw = string(frame[2:])
+	//ax.raw = strings.Replace(ax.raw, "\r", "", -1)
 	return ax
 
 }
 
+func DisplayAX25Packet(p AX25_struct) {
+	pathstr := ""
+	for i, path_id := range p.path {
+		tmpstr := fmt.Sprintf("%s-%d", path_id.callsign, path_id.Ssid)
+		if i > 0 {
+			pathstr = pathstr + " "
+		}
+		pathstr = pathstr + tmpstr
+
+	}
+	fmt.Printf("Dst ID: %s-%d\n", p.dst.callsign, p.dst.Ssid)
+	fmt.Printf("Src ID: %s-%d\n", p.src.callsign, p.src.Ssid)
+	fmt.Printf("Path  : %s\n", pathstr)
+	fmt.Printf("Msg   : %s\n", p.raw)
+	fmt.Println()
+
+}
+
 func main() {
-	conn, err := net.Dial("tcp", "localhost:8001")
+	server := "localhost:8001"
+	if len(os.Args) > 1 {
+		server = os.Args[1]
+	}
+
+	conn, err := net.Dial("tcp", server)
 	if err != nil {
-		panic(err)
+		log.Fatalf("Error connecting to modem: %s", err)
 	}
 	defer conn.Close()
+	fmt.Printf("Connected to KISS Server at %s\n", server)
 	buffer := make([]byte, 1024)
-	mLen, err := conn.Read(buffer)
-	if err != nil {
-		fmt.Println("Error reading:", err.Error())
+
+	for {
+		mLen, err := conn.Read(buffer)
+
+		if err != nil {
+			log.Fatalf("Error reading conn: %s", err)
+		}
+		DisplayAX25Packet(ParseAX25(buffer[:mLen]))
 	}
-	fmt.Println("Recieved:")
-	PrintHexBytes(buffer[:mLen])
-	fmt.Println("Parsed:")
-	fmt.Println(ParseAX25(buffer[:mLen]))
+
 }
