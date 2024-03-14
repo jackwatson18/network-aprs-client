@@ -1,12 +1,29 @@
 package main
 
 import (
+	"errors"
 	"fmt"
 	"log"
 	"net"
 	"os"
 	"strings"
 )
+
+const (
+	MsgPosWithoutTimeNotMessageCapable = iota
+	MsgPositionWithTimestamp
+	MsgMessage
+	MsgObject
+	MsgPosWithoutTimeMessageCapable
+	MsgQuery
+	MsgTelemetry
+	MsgMicE
+)
+
+type APRS_Packet struct {
+	original_AX25 AX25_struct
+	msg_type      int
+}
 
 var AX25_SSID_BITMASK byte = 0xf
 
@@ -83,6 +100,43 @@ func DisplayAX25Packet(p AX25_struct) {
 
 }
 
+func parseAPRS(p AX25_struct) (APRS_Packet, error) {
+	msgType := -1
+	switch p.raw[0] {
+	case '!':
+		msgType = MsgPosWithoutTimeNotMessageCapable
+	case '=':
+		msgType = MsgPosWithoutTimeMessageCapable
+	}
+	if msgType == -1 {
+		return APRS_Packet{}, errors.New("parseAPRStype: Invalid packet type")
+	}
+
+	packet := APRS_Packet{original_AX25: p, msg_type: msgType}
+	switch packet.msg_type {
+	case MsgPosWithoutTimeNotMessageCapable:
+		packet, _ = parseAPRSPositionNoTime(packet)
+	case MsgPosWithoutTimeMessageCapable:
+		packet, _ = parseAPRSPositionNoTime(packet)
+	}
+
+	return packet, nil
+
+}
+
+func parseAPRSPositionNoTime(packet APRS_Packet) (APRS_Packet, error) {
+	packetText := packet.original_AX25.raw[1:] // strip off identifer byte
+	latitude := packetText[0:8]
+	symbolTableID := packetText[8]
+	longitude := packetText[9:18]
+	symbolCode := packetText[18]
+	comment := packetText[19:]
+
+	fmt.Printf("lat: %s, long: %s symbol:%s%s, comment: %s", latitude, longitude, string(symbolTableID), string(symbolCode), comment)
+	return packet, nil
+
+}
+
 func main() {
 	server := "localhost:8001"
 	if len(os.Args) > 1 {
@@ -103,7 +157,9 @@ func main() {
 		if err != nil {
 			log.Fatalf("Error reading conn: %s", err)
 		}
-		DisplayAX25Packet(ParseAX25(buffer[:mLen]))
+		ax_25 := ParseAX25(buffer[:mLen])
+		DisplayAX25Packet(ax_25)
+		parseAPRS(ax_25)
 	}
 
 }
