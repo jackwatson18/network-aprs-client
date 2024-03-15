@@ -1,11 +1,13 @@
 package main
 
 import (
+	"crypto/md5"
 	"errors"
 	"fmt"
 	"log"
 	"net"
 	"os"
+	"strconv"
 	"strings"
 )
 
@@ -126,23 +128,73 @@ func parseAPRS(p AX25_struct) (APRS_Packet, error) {
 
 func parseAPRSPositionNoTime(packet APRS_Packet) (APRS_Packet, error) {
 	packetText := packet.original_AX25.raw[1:] // strip off identifer byte
-	latitude := packetText[0:8]
+	raw_lat := packetText[0:8]
 	symbolTableID := packetText[8]
-	longitude := packetText[9:18]
+	raw_long := packetText[9:18]
 	symbolCode := packetText[18]
 	comment := packetText[19:]
 
-	fmt.Printf("lat: %s, long: %s symbol:%s%s, comment: %s", latitude, longitude, string(symbolTableID), string(symbolCode), comment)
+	latitude, longitude, _ := AnalogToDigitalAPRSCoords(raw_lat, raw_long)
+
+	fmt.Printf("lat: %f, long: %f symbol:%s%s, comment: %s", latitude, longitude, string(symbolTableID), string(symbolCode), comment)
 	return packet, nil
 
 }
 
-func main() {
-	server := "localhost:8001"
-	if len(os.Args) > 1 {
-		server = os.Args[1]
+func AnalogToDigitalAPRSCoords(alat string, along string) (float64, float64, error) {
+	// Takes coordinate data as byte array, returns as coordinate pair.
+	// APRS gives us coordinates as old school hours, minutes...we want a pure integer coordinate.
+	if len(alat) != 8 {
+		return 0, 0, errors.New("AnalogToDigitalAPRSCoords: Invalid analog latitude length")
+	}
+	if len(along) != 9 {
+		return 0, 0, errors.New("AnalogToDigitalAPRSCoords: Invalid analog longitude length")
+	}
+	lat, long := 0.0, 0.0
+
+	degrees, err := strconv.Atoi(alat[0:2])
+	if err != nil {
+		return 0, 0, err
 	}
 
+	minutes, err := strconv.Atoi(alat[2:4])
+	if err != nil {
+		return 0, 0, err
+	}
+	seconds, err := strconv.Atoi(alat[5:7])
+	if err != nil {
+		return 0, 0, err
+	}
+
+	lat = float64(degrees) + float64(minutes)/60 + float64(seconds)/3600
+	if alat[7] == 'S' {
+		lat = lat * -1
+	}
+
+	degrees, err = strconv.Atoi(along[0:3])
+	if err != nil {
+		return 0, 0, err
+	}
+
+	minutes, err = strconv.Atoi(along[3:5])
+	if err != nil {
+		return 0, 0, err
+	}
+
+	seconds, err = strconv.Atoi(along[6:8])
+	if err != nil {
+		return 0, 0, err
+	}
+
+	long = float64(degrees) + float64(minutes)/60 + float64(seconds)/3600
+	if along[8] == 'W' {
+		long = long * -1
+	}
+
+	return lat, long, nil
+}
+
+func MonitorLoop(server string) {
 	conn, err := net.Dial("tcp", server)
 	if err != nil {
 		log.Fatalf("Error connecting to modem: %s", err)
@@ -157,9 +209,47 @@ func main() {
 		if err != nil {
 			log.Fatalf("Error reading conn: %s", err)
 		}
+		h := md5.New()
+		h.Write(buffer[:mLen])
+		filepath := fmt.Sprintf("packetFiles/%x.ax25", h.Sum(nil))
+		WriteBytesToFile(buffer[:mLen], filepath)
 		ax_25 := ParseAX25(buffer[:mLen])
+
+		// write bytes to file for testing
+
 		DisplayAX25Packet(ax_25)
 		parseAPRS(ax_25)
 	}
+}
+
+func WriteBytesToFile(data []byte, filename string) {
+	err := os.WriteFile(filename, data, 0775)
+	if err != nil {
+		log.Fatal(err)
+	}
+}
+
+func ReadAX25FromFile(filename string) (AX25_struct, error) {
+	data, err := os.ReadFile(filename)
+
+	if err != nil {
+		log.Fatal(err)
+	}
+
+	result := ParseAX25(data)
+	DisplayAX25Packet(result)
+
+	return result, nil
+}
+
+func main() {
+	server := "localhost:8001"
+	if len(os.Args) > 1 {
+		server = os.Args[1]
+	}
+	result, _ := ReadAX25FromFile("packetFiles/820503b7fd4e7f84bfea19411d1abdd0a5d438ca504d2ee71489c80e69ce9446.ax25")
+	parseAPRS(result)
+	//	fmt.Println(packet)
+	MonitorLoop(server)
 
 }
