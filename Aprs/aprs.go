@@ -176,7 +176,9 @@ func DisplayAX25Packet(p AX25_struct) {
 
 func parseAPRS(p AX25_struct) (APRS_Packet, error) {
 	msgType := -1
-	fmt.Println()
+	// fmt.Println()
+	packet := APRS_Packet{original_AX25: p}
+	packet.raw = p.raw
 	switch p.raw[0] {
 	case '!':
 		msgType = MsgPosWithoutTimeNotMessageCapable
@@ -184,25 +186,35 @@ func parseAPRS(p AX25_struct) (APRS_Packet, error) {
 		msgType = MsgPosWithoutTimeMessageCapable
 	}
 	if msgType == -1 {
-		return APRS_Packet{}, errors.New("parseAPRStype: Invalid packet type")
+		return packet, fmt.Errorf("parseAPRStype: Invalid packet type '%s'", string(p.raw[0]))
 	}
 
-	packet := APRS_Packet{original_AX25: p, msg_type: msgType}
-	packet.raw = p.raw
+	packet.msg_type = msgType
+	var err error = nil
 	switch packet.msg_type {
 	case MsgPosWithoutTimeNotMessageCapable:
-		packet, _ = parseAPRSPositionNoTime(packet)
+		// fmt.Println("ParsingPosition...")
+		packet, err = parseAPRSPositionNoTime(packet)
+
 	case MsgPosWithoutTimeMessageCapable:
-		packet, _ = parseAPRSPositionNoTime(packet)
+		// fmt.Println("ParsingPosition...")
+		packet, err = parseAPRSPositionNoTime(packet)
 	}
 
-	return packet, nil
+	if err != nil {
+		fmt.Printf("ERR: %s\n", err)
+	}
+
+	// fmt.Printf("PACKET TO FOLLOW: ")
+	fmt.Println()
+	fmt.Println(packet)
+	return packet, err
 
 }
 
 func extractExtentionData(data string, packet APRS_Packet) (string, APRS_Packet, error) {
-	if len(data) != 7 {
-		return data, packet, errors.New("extractExtentionData: data length must be 7 bytes")
+	if len(data) < 7 {
+		return data, packet, fmt.Errorf("extractExtentionData: data length must be 7 bytes or more but got %d", len(data))
 	}
 
 	if data[3] == '/' { // CSE/SPD
@@ -242,6 +254,7 @@ func extractAltitudeFromCommentText(data string, packet APRS_Packet) (string, AP
 
 func parseAPRSPositionNoTime(packet APRS_Packet) (APRS_Packet, error) {
 	packetText := packet.original_AX25.raw[1:] // strip off identifer byte
+	// fmt.Printf("****PacketText: %s\n", packetText)
 	raw_lat := packetText[0:8]
 	symbolTableID := packetText[8]
 	raw_long := packetText[9:18]
@@ -250,10 +263,19 @@ func parseAPRSPositionNoTime(packet APRS_Packet) (APRS_Packet, error) {
 	// fmt.Println(extentionData)
 	// fmt.Println(packetText[26:])
 
-	latitude, longitude, _ := AnalogToDigitalAPRSCoords(raw_lat, raw_long)
+	latitude, longitude, err := AnalogToDigitalAPRSCoords(raw_lat, raw_long)
+	if err != nil {
+		return packet, err
+	}
 	// after this point, data existing is not guaranteed. Use consumer model.
-	packetText, packet, _ = extractExtentionData(packetText[19:], packet)
-	packetText, packet, _ = extractAltitudeFromCommentText(packetText, packet)
+	packetText, packet, err = extractExtentionData(packetText[19:], packet)
+	if err != nil {
+		return packet, err
+	}
+	packetText, packet, err = extractAltitudeFromCommentText(packetText, packet)
+	if err != nil {
+		return packet, err
+	}
 	// altitude, comment, err := checkAndPullAltitudeFromComment(packetText[19:])
 	// if err != nil {
 	// 	log.Default().Println("Error encountered parsing altitude from comment.")
@@ -269,7 +291,7 @@ func parseAPRSPositionNoTime(packet APRS_Packet) (APRS_Packet, error) {
 	packet.comment = comment
 
 	//fmt.Printf("lat: %f, long: %f symbol:%s%s, heading: %d, speed: %dkts, altitude: %dft, comment: %s\n", latitude, longitude, string(symbolTableID), string(symbolCode), heading, speed, altitude, comment)
-	fmt.Println(packet)
+	// fmt.Println(packet)
 	return packet, nil
 
 }
@@ -366,7 +388,10 @@ func ConnectionLoop(server string) {
 		// write bytes to file for testing
 
 		// DisplayAX25Packet(ax_25)
-		packet, _ := parseAPRS(ax_25)
+		packet, err := parseAPRS(ax_25)
+		if err != nil {
+			fmt.Printf("error parsing packet: %s\n \t raw packet: %s", err, packet.raw)
+		}
 		WriteAPRSPacketToDB(packet)
 
 	}
@@ -393,7 +418,7 @@ func ReadAX25FromFile(filename string) (AX25_struct, []byte, error) {
 }
 
 func MainLoop(server string) {
-	// _, raw, _ := ReadAX25FromFile("packetFiles/8b16a8d74a7e2df17a8055b2e60ca43a.ax25")
+	//  result , raw, _ := ReadAX25FromFile("packetFiles/8b16a8d74a7e2df17a8055b2e60ca43a.ax25")
 	//parseAPRS(result)
 	// PrintHexBytes(raw)
 	go ConnectionLoop(server)
