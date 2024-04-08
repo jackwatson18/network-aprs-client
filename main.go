@@ -3,6 +3,7 @@ package main
 import (
 	"database/sql"
 	"log"
+	"os"
 	"time"
 
 	"github.com/jackwatson18/network-aprs-client/Aprs"
@@ -28,7 +29,8 @@ func createDB() {
 		altitude INTEGER,
 		comment TEXT,
 		symbolTableId TEXT,
-		symbolId TEXT
+		symbolId TEXT,
+		raw TEXT
 	)`
 
 	_, err = db.Exec(sqlStatement)
@@ -38,7 +40,11 @@ func createDB() {
 }
 
 func main() {
-	go Aprs.ConnectionLoop("localhost:8001")
+	server := "localhost:8001"
+	if len(os.Args) > 1 {
+		server = os.Args[1]
+	}
+	go Aprs.ConnectionLoop(server)
 
 	createDB()
 

@@ -38,6 +38,7 @@ type APRS_Packet struct {
 	comment       string
 	symbolTableId string
 	symbolId      string
+	raw           string
 }
 
 var AX25_SSID_BITMASK byte = 0xf
@@ -76,8 +77,9 @@ func WriteAPRSPacketToDB(packet APRS_Packet) {
 		altitude,
 		comment,
 		symbolTableId,
-		symbolId
-		) VALUES (?,?,?,?,?,?,?,?,?,?)
+		symbolId,
+		raw
+		) VALUES (?,?,?,?,?,?,?,?,?,?, ?)
 	`
 
 	stmt, err := tx.Prepare(sqlStatement)
@@ -99,7 +101,8 @@ func WriteAPRSPacketToDB(packet APRS_Packet) {
 		packet.altitude,
 		packet.comment,
 		packet.symbolTableId,
-		packet.symbolId)
+		packet.symbolId,
+		packet.original_AX25.raw)
 	if err != nil {
 		log.Fatal(err)
 	}
@@ -173,6 +176,7 @@ func DisplayAX25Packet(p AX25_struct) {
 
 func parseAPRS(p AX25_struct) (APRS_Packet, error) {
 	msgType := -1
+	fmt.Println()
 	switch p.raw[0] {
 	case '!':
 		msgType = MsgPosWithoutTimeNotMessageCapable
@@ -184,6 +188,7 @@ func parseAPRS(p AX25_struct) (APRS_Packet, error) {
 	}
 
 	packet := APRS_Packet{original_AX25: p, msg_type: msgType}
+	packet.raw = p.raw
 	switch packet.msg_type {
 	case MsgPosWithoutTimeNotMessageCapable:
 		packet, _ = parseAPRSPositionNoTime(packet)
@@ -195,30 +200,70 @@ func parseAPRS(p AX25_struct) (APRS_Packet, error) {
 
 }
 
+func extractExtentionData(data string, packet APRS_Packet) (string, APRS_Packet, error) {
+	if len(data) != 7 {
+		return data, packet, errors.New("extractExtentionData: data length must be 7 bytes")
+	}
+
+	if data[3] == '/' { // CSE/SPD
+		heading, err := strconv.Atoi(data[0:3])
+		if err != nil {
+			return data, packet, err
+		}
+		speed, err := strconv.Atoi(data[4:7])
+		if err != nil {
+			return data, packet, err
+		}
+
+		packet.heading = heading
+		packet.speed = speed
+		data = data[7:]
+
+	}
+
+	return data, packet, nil
+}
+
+func extractAltitudeFromCommentText(data string, packet APRS_Packet) (string, APRS_Packet, error) {
+	if data[0:3] == "/A=" {
+		if len(data) < 9 {
+			return data, packet, errors.New("extractAltitude: detected altitude but length of data to short")
+		}
+		altitude, err := strconv.Atoi(data[3:9])
+		if err != nil {
+			return data, packet, err
+		}
+
+		packet.altitude = altitude
+		data = data[9:]
+	}
+	return data, packet, nil
+}
+
 func parseAPRSPositionNoTime(packet APRS_Packet) (APRS_Packet, error) {
 	packetText := packet.original_AX25.raw[1:] // strip off identifer byte
 	raw_lat := packetText[0:8]
 	symbolTableID := packetText[8]
 	raw_long := packetText[9:18]
 	symbolCode := packetText[18]
-	extentionData := packetText[19:26]
-	fmt.Println(extentionData)
-	fmt.Println(packetText[26:])
+	// extentionData := packetText[19:26]
+	// fmt.Println(extentionData)
+	// fmt.Println(packetText[26:])
 
 	latitude, longitude, _ := AnalogToDigitalAPRSCoords(raw_lat, raw_long)
-	heading, speed, _, _ := getBearingSpeedFromExtention(extentionData)
-	altitude, comment, err := checkAndPullAltitudeFromComment(packetText[19:])
-	if err != nil {
-		log.Default().Println("Error encountered parsing altitude from comment.")
-	}
+	// after this point, data existing is not guaranteed. Use consumer model.
+	packetText, packet, _ = extractExtentionData(packetText[19:], packet)
+	packetText, packet, _ = extractAltitudeFromCommentText(packetText, packet)
+	// altitude, comment, err := checkAndPullAltitudeFromComment(packetText[19:])
+	// if err != nil {
+	// 	log.Default().Println("Error encountered parsing altitude from comment.")
+	// }
 
-	comment = strings.Trim(comment, " ") // remove any extra spaces
+	comment := strings.Trim(packetText, " ") // remove any extra spaces
 
 	packet.latitude = latitude
 	packet.longitude = longitude
-	packet.heading = heading
-	packet.speed = speed
-	packet.altitude = altitude
+
 	packet.symbolTableId = string(symbolTableID)
 	packet.symbolId = string(symbolCode)
 	packet.comment = comment
@@ -227,42 +272,6 @@ func parseAPRSPositionNoTime(packet APRS_Packet) (APRS_Packet, error) {
 	fmt.Println(packet)
 	return packet, nil
 
-}
-
-func checkAndPullAltitudeFromComment(data string) (int, string, error) {
-	// Gets altitude in feet from comment. If altitude not in comment, return unmodified string.
-	// Also returns the remaining comment string after parsing. Will not modify if no altitude encoding detected.
-	// fmt.Println(data[0:3])
-	if data[0:3] == "/A=" {
-		alt, err := strconv.Atoi(data[3:9])
-		fmt.Println(alt)
-		if err != nil {
-			return 0, data, err
-		}
-		comment := data[9:]
-		fmt.Println(comment)
-		return alt, comment, nil
-	} else {
-		return 0, data, nil
-	}
-}
-
-func getBearingSpeedFromExtention(data string) (int, int, string, error) {
-	if data[3] != '/' {
-		return 0, 0, data, nil
-	}
-	bearing, err := strconv.Atoi(data[0:3])
-
-	if err != nil {
-		return 0, 0, data, err
-	}
-
-	speed, err := strconv.Atoi(data[4:7])
-	if err != nil {
-		return 0, 0, data, err
-	}
-
-	return bearing, speed, data[7:], nil
 }
 
 func AnalogToDigitalAPRSCoords(alat string, along string) (float64, float64, error) {
@@ -383,11 +392,7 @@ func ReadAX25FromFile(filename string) (AX25_struct, []byte, error) {
 	return result, data, nil
 }
 
-func MainLoop() {
-	server := "localhost:8001"
-	if len(os.Args) > 1 {
-		server = os.Args[1]
-	}
+func MainLoop(server string) {
 	// _, raw, _ := ReadAX25FromFile("packetFiles/8b16a8d74a7e2df17a8055b2e60ca43a.ax25")
 	//parseAPRS(result)
 	// PrintHexBytes(raw)
