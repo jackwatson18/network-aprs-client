@@ -6,53 +6,54 @@ import (
 	"errors"
 	"fmt"
 	"log"
+	"math"
 	"net"
 	"os"
 	"strconv"
 	"strings"
-	"time"
 
 	_ "github.com/mattn/go-sqlite3"
 )
 
 const (
 	MsgPosWithoutTimeNotMessageCapable = iota
-	MsgPositionWithTimestamp
 	MsgMessage
-	MsgObject
 	MsgPosWithoutTimeMessageCapable
-	MsgQuery
-	MsgTelemetry
-	MsgMicE
+	MsgStatus
 )
 
 type APRS_Packet struct {
-	id            int
-	original_AX25 AX25_struct
-	msg_type      int
-	latitude      float64
-	longitude     float64
-	heading       int
-	speed         int
-	altitude      int
-	comment       string
-	symbolTableId string
-	symbolId      string
-	raw           string
+	Id            int
+	Original_AX25 AX25_struct
+	Src_callsign  string
+	Src_ssid      uint8
+	Dst_callsign  string
+	Dst_ssid      uint8
+	Path          []AX25_Address
+	Msg_type      int
+	Latitude      float64
+	Longitude     float64
+	Heading       int
+	Speed         int
+	Altitude      int
+	Comment       string
+	SymbolTableId string
+	SymbolId      string
+	Raw           string
 }
 
 var AX25_SSID_BITMASK byte = 0xf
 
 type AX25_Address struct {
-	callsign string
+	Callsign string
 	Ssid     uint8 // AX.25 spec only gives 8 bytes
 }
 
 type AX25_struct struct {
-	dst  AX25_Address // dst is not really needed for APRS but we will retain it for compatibility
-	src  AX25_Address
-	path []AX25_Address
-	raw  string
+	Dst  AX25_Address // dst is not really needed for APRS but we will retain it for compatibility
+	Src  AX25_Address
+	Path []AX25_Address
+	Raw  string
 }
 
 func WriteAPRSPacketToDB(packet APRS_Packet) {
@@ -69,7 +70,9 @@ func WriteAPRSPacketToDB(packet APRS_Packet) {
 	sqlStatement := `
 	INSERT INTO aprs (
 		send_callsign,
+		send_ssid,
 		dest_callsign,
+		dest_ssid,
 		longitude,
 		latitude,
 		heading,
@@ -79,30 +82,29 @@ func WriteAPRSPacketToDB(packet APRS_Packet) {
 		symbolTableId,
 		symbolId,
 		raw
-		) VALUES (?,?,?,?,?,?,?,?,?,?, ?)
+		) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)
 	`
 
 	stmt, err := tx.Prepare(sqlStatement)
 	if err != nil {
-		log.Fatal(err)
+		log.Fatal("APRS", err)
 	}
 	defer stmt.Close()
 
-	source := fmt.Sprintf("%s-%d", packet.original_AX25.src.callsign, packet.original_AX25.src.Ssid)
-	dest := fmt.Sprintf("%s-%d", packet.original_AX25.dst.callsign, packet.original_AX25.dst.Ssid)
-
 	_, err = stmt.Exec(
-		source,
-		dest,
-		packet.longitude,
-		packet.latitude,
-		packet.heading,
-		packet.speed,
-		packet.altitude,
-		packet.comment,
-		packet.symbolTableId,
-		packet.symbolId,
-		packet.original_AX25.raw)
+		packet.Original_AX25.Src.Callsign,
+		packet.Original_AX25.Src.Ssid,
+		packet.Original_AX25.Dst.Callsign,
+		packet.Original_AX25.Dst.Ssid,
+		packet.Longitude,
+		packet.Latitude,
+		packet.Heading,
+		packet.Speed,
+		packet.Altitude,
+		packet.Comment,
+		packet.SymbolTableId,
+		packet.SymbolId,
+		packet.Original_AX25.Raw)
 	if err != nil {
 		log.Fatal(err)
 	}
@@ -128,13 +130,209 @@ func ParseAX25Address(raw []byte) AX25_Address {
 	}
 
 	call := strings.TrimSpace(string(output[0:6]))
-	address := AX25_Address{callsign: call, Ssid: uint8(output[6] & AX25_SSID_BITMASK)}
+	address := AX25_Address{Callsign: call, Ssid: uint8(output[6] & AX25_SSID_BITMASK)}
 	// Only part of the last byte refers to the address/SSID. The funky bitmasking above makes sure we only care about the last bits.
 
 	return address
 }
 
+func UnparseAX25Address(addr AX25_Address) []byte {
+	output := make([]byte, 7)
+	for i, char := range addr.Callsign {
+		output[i] = byte(char) << 1
+	}
+
+	output[6] = addr.Ssid << 1
+	fmt.Println(string(output))
+	return output
+}
+
+func APRS_to_AX25(packet APRS_Packet) (AX25_struct, error) {
+	new_ax25 := AX25_struct{}
+	dst := AX25_Address{Callsign: packet.Dst_callsign, Ssid: packet.Dst_ssid}
+	src := AX25_Address{Callsign: packet.Src_callsign, Ssid: packet.Src_ssid}
+	new_ax25.Src = src
+	new_ax25.Dst = dst
+	new_ax25.Path = packet.Path
+
+	if packet.Latitude != 0 || packet.Longitude != 0 {
+		new_ax25.Raw = encodeCoords(packet)
+	}
+	if packet.Altitude != 0 {
+		new_ax25.Raw = new_ax25.Raw + EncodeAltitude(packet.Altitude)
+	}
+	new_ax25.Raw = new_ax25.Raw + packet.Comment
+
+	return new_ax25, nil
+
+}
+
+func EncodeAltitude(alt int) string {
+	output := "/A=" // prefix
+	str_alt := strconv.Itoa(alt)
+	for i := len(str_alt); i < 6; i++ {
+		output = output + "0"
+	}
+	output = output + str_alt
+	return output
+}
+
+func encodeCoords(packet APRS_Packet) string {
+	lat := packet.Latitude
+	long := packet.Longitude
+	// lat first
+	output := "="
+	var latSymbol string
+	if lat >= 0 {
+		latSymbol = "N"
+	} else {
+		latSymbol = "S"
+		lat = lat * -1
+	}
+	lat_deg := math.Floor(lat)
+	lat_minutes_unrounded := (lat - lat_deg) * 60
+	lat_minutes := math.Floor(lat_minutes_unrounded)
+	lat_seconds := math.Floor((lat_minutes_unrounded - lat_minutes) * 100)
+
+	// pad out degrees in lat
+	lat_deg_str := strconv.Itoa(int(lat_deg))
+	for i := len(lat_deg_str); i < 2; i++ {
+		output = output + "0"
+	}
+	output = output + lat_deg_str
+
+	// pad out minute in lat
+	lat_min_str := strconv.Itoa(int(lat_minutes))
+	for i := len(lat_min_str); i < 2; i++ {
+		output = output + "0"
+	}
+	output = output + lat_min_str
+
+	// add decimal point
+	output = output + "."
+
+	// add seconds and pad as necessary
+	lat_sec_str := strconv.Itoa(int(lat_seconds))
+	for i := len(lat_sec_str); i < 2; i++ {
+		output = output + "0"
+	}
+	output = output + lat_sec_str
+
+	// add N/S symbol
+	output = output + latSymbol
+	// add symbol table ID
+	output = output + packet.SymbolTableId
+
+	// now do longitude
+	var longSymbol string
+	if long >= 0 {
+		longSymbol = "E"
+	} else {
+		longSymbol = "W"
+		long = long * -1
+	}
+
+	long_degrees := math.Floor(long)
+	long_mins_unrounded := (long - long_degrees) * 60
+	long_mins := math.Floor(long_mins_unrounded)
+	long_seconds := math.Floor((long_mins_unrounded - long_mins) * 100)
+
+	// convert to string and add
+	long_deg_str := strconv.Itoa(int(long_degrees))
+	for i := len(long_deg_str); i < 3; i++ {
+		output = output + "0"
+	}
+	output = output + long_deg_str
+
+	// do minutes
+	long_min_str := strconv.Itoa(int(long_mins))
+	for i := len(long_min_str); i < 2; i++ {
+		output = output + "0"
+	}
+	output = output + long_min_str
+	output = output + "."
+
+	long_seconds_str := strconv.Itoa(int(long_seconds))
+	for i := len(long_seconds_str); i < 2; i++ {
+		output = output + "0"
+	}
+	output = output + long_seconds_str
+	output = output + longSymbol
+
+	// finally, apend symbol  identifier
+	output = output + packet.SymbolId
+	return output
+}
+
+func ModifiedAX25_to_bytes(frame AX25_struct) []byte {
+	// capture an existing valid frame header and use it to package data
+	_, raw, _ := ReadAX25FromFile("packetFiles/test2.ax25")
+	raw_frame := raw
+	for i, b := range raw {
+		if b == 0xf0 {
+			raw_frame = raw_frame[:i+1]
+		}
+	}
+	raw_frame = append(raw_frame, []byte(frame.Raw)...)
+
+	return raw_frame
+}
+
+func AX25_to_bytes(frame AX25_struct) ([]byte, error) {
+	bytes := make([]byte, 0)
+	// flag byte indicates start of frame or end of frame
+	bytes = append(bytes, 0xc0)
+	bytes = append(bytes, 0x00) // KISS command byte, will always be zero in our use case
+	// Must be 6 bytes. If not 6 bytes, pad with spaces.
+
+	// ax25 flag
+	// bytes = append(bytes, 0x7e)
+
+	// repeat padding for Src
+	for len(frame.Dst.Callsign) < 6 {
+		frame.Dst.Callsign = frame.Dst.Callsign + " "
+	}
+
+	raw_dst := UnparseAX25Address(frame.Dst)
+	bytes = append(bytes, raw_dst...)
+
+	for len(frame.Src.Callsign) < 6 {
+		frame.Src.Callsign = frame.Src.Callsign + " "
+	}
+
+	raw_src := UnparseAX25Address(frame.Src)
+	bytes = append(bytes, raw_src...)
+
+	// loop over list of addresses in path and do same stuff then add them in.
+	for _, path_addr := range frame.Path {
+		for len(path_addr.Callsign) < 6 {
+			path_addr.Callsign = path_addr.Callsign + " "
+		}
+		raw_path := UnparseAX25Address(path_addr)
+		bytes = append(bytes, raw_path...)
+	}
+
+	// UI control field and protocol field bytes (Per APRS documentation)
+	bytes = append(bytes, 0x03)
+	bytes = append(bytes, 0xf0)
+
+	bytes = append(bytes, []byte(frame.Raw)...)
+
+	// at this point a checksum should be generated in order to meet spec, but the means of doing so are nontrivial. left blank for now.
+	// bytes = append(bytes, 0xf0)
+	// bytes = append(bytes, 0x0f)
+
+	// ax25 flag
+	// bytes = append(bytes, 0x7e)
+	// flag byte indicates start of frame or end of frame
+	bytes = append(bytes, 0xc0)
+
+	return bytes, nil
+}
+
 func ParseAX25(raw_frame []byte) AX25_struct {
+	// WriteBytesToFile(raw_frame, "packetFiles/test2.ax25")
+	PrintHexBytes(raw_frame)
 	frame := raw_frame[2 : len(raw_frame)-1] // strip control headers
 	//PrintHexBytes(frame)
 	ax := AX25_struct{}
@@ -143,14 +341,14 @@ func ParseAX25(raw_frame []byte) AX25_struct {
 	src := ParseAX25Address(frame[7:14])
 	// fmt.Println(src)
 	// fmt.Println(dst)
-	ax.dst = dst
-	ax.src = src
+	ax.Dst = dst
+	ax.Src = src
 	frame = frame[14:]
 	for len(frame) > 7 && frame[0] != 3 {
-		ax.path = append(ax.path, ParseAX25Address(frame[:7]))
+		ax.Path = append(ax.Path, ParseAX25Address(frame[:7]))
 		frame = frame[7:]
 	}
-	ax.raw = string(frame[2:])
+	ax.Raw = string(frame[2:])
 	//ax.raw = strings.Replace(ax.raw, "\r", "", -1)
 	return ax
 
@@ -158,18 +356,18 @@ func ParseAX25(raw_frame []byte) AX25_struct {
 
 func DisplayAX25Packet(p AX25_struct) {
 	pathstr := ""
-	for i, path_id := range p.path {
-		tmpstr := fmt.Sprintf("%s-%d", path_id.callsign, path_id.Ssid)
+	for i, path_id := range p.Path {
+		tmpstr := fmt.Sprintf("%s-%d", path_id.Callsign, path_id.Ssid)
 		if i > 0 {
 			pathstr = pathstr + " "
 		}
 		pathstr = pathstr + tmpstr
 
 	}
-	fmt.Printf("Dst ID: %s-%d\n", p.dst.callsign, p.dst.Ssid)
-	fmt.Printf("Src ID: %s-%d\n", p.src.callsign, p.src.Ssid)
+	fmt.Printf("Dst ID: %s-%d\n", p.Dst.Callsign, p.Dst.Ssid)
+	fmt.Printf("Src ID: %s-%d\n", p.Src.Callsign, p.Src.Ssid)
 	fmt.Printf("Path  : %s\n", pathstr)
-	fmt.Printf("Msg   : %s\n", p.raw)
+	fmt.Printf("Msg   : %s\n", p.Raw)
 	fmt.Println()
 
 }
@@ -177,27 +375,40 @@ func DisplayAX25Packet(p AX25_struct) {
 func parseAPRS(p AX25_struct) (APRS_Packet, error) {
 	msgType := -1
 	// fmt.Println()
-	packet := APRS_Packet{original_AX25: p}
-	packet.raw = p.raw
-	switch p.raw[0] {
+	packet := APRS_Packet{Original_AX25: p}
+	packet.Raw = p.Raw
+	packet.Src_callsign = p.Src.Callsign
+	packet.Src_ssid = p.Src.Ssid
+	packet.Dst_callsign = p.Dst.Callsign
+	packet.Dst_ssid = p.Dst.Ssid
+
+	switch p.Raw[0] {
 	case '!':
 		msgType = MsgPosWithoutTimeNotMessageCapable
 	case '=':
 		msgType = MsgPosWithoutTimeMessageCapable
+	case '>':
+		msgType = MsgStatus
+	case ':':
+		msgType = MsgMessage
 	}
 	if msgType == -1 {
-		return packet, fmt.Errorf("parseAPRStype: Invalid packet type '%s'", string(p.raw[0]))
+		return packet, fmt.Errorf("parseAPRStype: Invalid packet type '%s'", string(p.Raw[0]))
 	}
 
-	packet.msg_type = msgType
+	packet.Msg_type = msgType
 	var err error = nil
-	switch packet.msg_type {
+	switch packet.Msg_type {
 	case MsgPosWithoutTimeNotMessageCapable:
 		// fmt.Println("ParsingPosition...")
 		packet, err = parseAPRSPositionNoTime(packet)
 
 	case MsgPosWithoutTimeMessageCapable:
 		// fmt.Println("ParsingPosition...")
+		packet, err = parseAPRSPositionNoTime(packet)
+	case MsgMessage:
+		packet.Comment = p.Raw
+	case MsgStatus:
 		packet, err = parseAPRSPositionNoTime(packet)
 	}
 
@@ -227,8 +438,8 @@ func extractExtentionData(data string, packet APRS_Packet) (string, APRS_Packet,
 			return data, packet, err
 		}
 
-		packet.heading = heading
-		packet.speed = speed
+		packet.Heading = heading
+		packet.Speed = speed
 		data = data[7:]
 
 	}
@@ -246,15 +457,18 @@ func extractAltitudeFromCommentText(data string, packet APRS_Packet) (string, AP
 			return data, packet, err
 		}
 
-		packet.altitude = altitude
+		packet.Altitude = altitude
 		data = data[9:]
 	}
 	return data, packet, nil
 }
 
 func parseAPRSPositionNoTime(packet APRS_Packet) (APRS_Packet, error) {
-	packetText := packet.original_AX25.raw[1:] // strip off identifer byte
+	packetText := packet.Original_AX25.Raw[1:] // strip off identifer byte
 	// fmt.Printf("****PacketText: %s\n", packetText)
+	if len(packetText) < 18 {
+		return packet, errors.New("parseAPRSPositionNoTime: Packet text is too short")
+	}
 	raw_lat := packetText[0:8]
 	symbolTableID := packetText[8]
 	raw_long := packetText[9:18]
@@ -283,12 +497,12 @@ func parseAPRSPositionNoTime(packet APRS_Packet) (APRS_Packet, error) {
 
 	comment := strings.Trim(packetText, " ") // remove any extra spaces
 
-	packet.latitude = latitude
-	packet.longitude = longitude
+	packet.Latitude = latitude
+	packet.Longitude = longitude
 
-	packet.symbolTableId = string(symbolTableID)
-	packet.symbolId = string(symbolCode)
-	packet.comment = comment
+	packet.SymbolTableId = string(symbolTableID)
+	packet.SymbolId = string(symbolCode)
+	packet.Comment = comment
 
 	//fmt.Printf("lat: %f, long: %f symbol:%s%s, heading: %d, speed: %dkts, altitude: %dft, comment: %s\n", latitude, longitude, string(symbolTableID), string(symbolCode), heading, speed, altitude, comment)
 	// fmt.Println(packet)
@@ -349,7 +563,7 @@ func AnalogToDigitalAPRSCoords(alat string, along string) (float64, float64, err
 	return lat, long, nil
 }
 
-func sendToModem(server string, data []byte) {
+func SendToModem(server string, data []byte) error {
 	conn, err := net.Dial("tcp", server)
 	if err != nil {
 		log.Fatalf("sendToModem: Error connecting to modem: %s", err)
@@ -362,6 +576,7 @@ func sendToModem(server string, data []byte) {
 	message = append(message, byte(0xC0))
 
 	conn.Write(message)
+	return nil
 }
 
 func ConnectionLoop(server string) {
@@ -390,9 +605,10 @@ func ConnectionLoop(server string) {
 		// DisplayAX25Packet(ax_25)
 		packet, err := parseAPRS(ax_25)
 		if err != nil {
-			fmt.Printf("error parsing packet: %s\n \t raw packet: %s", err, packet.raw)
+			fmt.Printf("error parsing packet: %s\n \t raw packet: %s", err, packet.Raw)
+		} else {
+			WriteAPRSPacketToDB(packet)
 		}
-		WriteAPRSPacketToDB(packet)
 
 	}
 }
@@ -417,13 +633,47 @@ func ReadAX25FromFile(filename string) (AX25_struct, []byte, error) {
 	return result, data, nil
 }
 
-func MainLoop(server string) {
-	//  result , raw, _ := ReadAX25FromFile("packetFiles/8b16a8d74a7e2df17a8055b2e60ca43a.ax25")
-	//parseAPRS(result)
-	// PrintHexBytes(raw)
-	go ConnectionLoop(server)
-	// sendToModem(server, raw)
-	for {
-		time.Sleep(time.Second)
+func TestConversions(server string) {
+	result, raw, _ := ReadAX25FromFile("packetFiles/test2.ax25")
+	SendToModem(server, raw)
+	fmt.Println("BYTES IN:")
+	PrintHexBytes(raw)
+	aprs_packet, _ := parseAPRS(result)
+	converted_ax, _ := APRS_to_AX25(aprs_packet)
+	raw_bytes := ModifiedAX25_to_bytes(converted_ax)
+	fmt.Println("BYTES OUT:")
+	PrintHexBytes(raw_bytes)
+	SendToModem(server, raw_bytes)
+
+}
+
+func TestCallsignShifting() {
+	addr := AX25_Address{Callsign: "KK7EWJ", Ssid: 0}
+	raw_addr := UnparseAX25Address(addr)
+	unraw_addr := ParseAX25Address(raw_addr)
+	fmt.Println(unraw_addr)
+}
+
+func TestEncodeAlt() {
+	fmt.Println(EncodeAltitude(123))
+}
+
+func TestEncodeCoords() {
+	packet := APRS_Packet{Latitude: 34.15, Longitude: -117.500, SymbolTableId: "/", SymbolId: "-"}
+	encodedCoords := encodeCoords(packet)
+	fmt.Println(encodedCoords)
+}
+
+func TestEncodeAndSend(server string) {
+	packet := APRS_Packet{
+		Latitude:      46.21235,
+		Longitude:     -117.1235,
+		SymbolTableId: "/",
+		SymbolId:      "-",
+		Altitude:      2134,
+		Comment:       "Test encode",
 	}
+	ax25, _ := APRS_to_AX25(packet)
+	raw := ModifiedAX25_to_bytes(ax25)
+	SendToModem(server, raw)
 }
