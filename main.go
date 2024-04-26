@@ -114,11 +114,13 @@ func recievePacket(c *gin.Context) {
 	}
 
 	newAPRS := Aprs.APRS_Packet{
-		Src_callsign: data.Callsign,
-		Src_ssid:     uint8(data.Ssid),
-		Latitude:     data.Latitude,
-		Longitude:    data.Longitude,
-		Comment:      data.Comment,
+		Src_callsign:  data.Callsign,
+		Src_ssid:      uint8(data.Ssid),
+		Latitude:      data.Latitude,
+		Longitude:     data.Longitude,
+		Comment:       data.Comment,
+		SymbolTableId: "/",
+		SymbolId:      "-",
 	}
 
 	axframe, err := Aprs.APRS_to_AX25(newAPRS)

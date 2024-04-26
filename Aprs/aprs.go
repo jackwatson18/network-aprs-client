@@ -147,6 +147,7 @@ func UnparseAX25Address(addr AX25_Address) []byte {
 	return output
 }
 
+// for sending data out
 func APRS_to_AX25(packet APRS_Packet) (AX25_struct, error) {
 	new_ax25 := AX25_struct{}
 	dst := AX25_Address{Callsign: packet.Dst_callsign, Ssid: packet.Dst_ssid}
@@ -278,6 +279,7 @@ func ModifiedAX25_to_bytes(frame AX25_struct) []byte {
 	return raw_frame
 }
 
+// end up not using this function, there are undocumented quirks in the spec that made this not compatible with software modem
 func AX25_to_bytes(frame AX25_struct) ([]byte, error) {
 	bytes := make([]byte, 0)
 	// flag byte indicates start of frame or end of frame
