@@ -11,3 +11,7 @@ APRS Navigator is capable of both recieving and sending APRS packets. It connect
 Works as a web server, allowing the actual client to be accessed on any device with a compatible web browser that can connect to the same local area network.
 ## Message storage and display
 Stores and displays a history of all recieved messages by the program.
+
+# Usage
+`go run .` to start the program or `go run . (address)` to run it connected to a modem not on the same local machine.
+Web interface can be accessed at `localhost:8080/static` or equivalent address if not running locally.
