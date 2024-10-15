@@ -18,11 +18,49 @@ const CONTROL_FIELD byte = 3
 const PROTOCOL_ID byte = 0xf0
 const AX25_SSID_BITMASK byte = 0xf
 
+type Callsign struct {
+	Call string
+	Ssid uint8
+}
+
+func (callsign Callsign) String() string {
+	if callsign.Ssid == 0 {
+		return callsign.Call
+	} else {
+		return fmt.Sprintf("%s-%v", callsign.Call, callsign.Ssid)
+	}
+}
+
+func (callsign Callsign) GoString() string {
+	return callsign.String()
+}
+
 type AX25_frame struct {
-	Dest_addr   string
-	Source_addr string
-	Digi_path   []string
+	Dest_addr   Callsign
+	Source_addr Callsign
+	Digi_path   []Callsign
 	Info_field  string
+}
+
+func (frame AX25_frame) String() string {
+	// multiline strings are stupid, ignore the weird formatting.
+	return fmt.Sprintf(
+		`      Dest: %s
+    Source: %s
+  DigiPath: %v
+Info Field: %s
+`, frame.Dest_addr, frame.Source_addr, frame.Digi_path, frame.Info_field)
+}
+
+func (frame AX25_frame) GoString() string {
+	return frame.String()
+}
+
+// Converts AX25 Frame to TNC2 format string output
+func (frame AX25_frame) TNC2() string {
+	output := fmt.Sprintf("%s>%s", frame.Source_addr, frame.Dest_addr)
+
+	return output
 }
 
 func ReadBytesFromFile(filename string) ([]byte, error) {
@@ -63,7 +101,7 @@ func ConvertBytesToAX25(data []byte) (AX25_frame, error) {
 	data = data[7:]
 
 	// parse digipeater path
-	var digi_path []string
+	var digi_path []Callsign
 	for len(data) > 7 && data[0] != CONTROL_FIELD { // Control field separating Digi path and rest of frame always 3
 		digi_addr, err := parseAddr(data[:7])
 		if err != nil {
@@ -86,21 +124,11 @@ func ConvertBytesToAX25(data []byte) (AX25_frame, error) {
 
 }
 
-func (frame AX25_frame) String() string {
-	// multiline strings are stupid, ignore the weird formatting.
-	return fmt.Sprintf(
-		`      Dest: %s
-    Source: %s
-  DigiPath: %v
-Info Field: %s
-`, frame.Dest_addr, frame.Source_addr, frame.Digi_path, frame.Info_field)
-}
-
 // converts Destination or Source address in AX.25 frame to a string readable format.
-func parseAddr(addr []byte) (string, error) {
+func parseAddr(addr []byte) (Callsign, error) {
 	// addr is ALWAYS 7 bytes.
 	if len(addr) != 7 {
-		return "", fmt.Errorf(`bytesToAddr: addr must be 7 bytes but got %v`, len(addr))
+		return Callsign{}, fmt.Errorf(`bytesToAddr: addr must be 7 bytes but got %v`, len(addr))
 	}
 
 	output := make([]byte, len(addr))
@@ -111,7 +139,7 @@ func parseAddr(addr []byte) (string, error) {
 	call := strings.TrimSpace(string(output[0:6]))
 	ssid := uint8(output[6] & AX25_SSID_BITMASK)
 
-	return fmt.Sprintf("%s-%v", call, ssid), nil
+	return Callsign{Call: call, Ssid: ssid}, nil
 }
 
 func ListenOnlyLoop(server string) {

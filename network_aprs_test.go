@@ -117,7 +117,7 @@ func Test_parseAddr_FailIfTooLong(t *testing.T) {
 
 func Test_parseAddr_CorrectOutput(t *testing.T) {
 	result, err := parseAddr([]byte{0x96, 0x96, 0x6E, 0x8A, 0xAE, 0x94, 0x6F})
-	expect := "KK7EWJ-7"
+	expect := Callsign{Call: "KK7EWJ", Ssid: 7}
 
 	if err != nil {
 		t.Errorf("Expected no error but got %v", err)
@@ -129,9 +129,12 @@ func Test_parseAddr_CorrectOutput(t *testing.T) {
 }
 
 func Test_AX25_frame_String(t *testing.T) {
-	input := AX25_frame{Dest_addr: "KK7EWJ-0", Source_addr: "N0CALL-0", Digi_path: []string{"WIDE1-1", "WIDE2-1"}, Info_field: "foobar"}.String()
-	expect := `      Dest: KK7EWJ-0
-    Source: N0CALL-0
+	dst := Callsign{Call: "KK7EWJ", Ssid: 0}
+	src := Callsign{Call: "N0CALL", Ssid: 0}
+	path := []Callsign{{Call: "WIDE1", Ssid: 1}, {Call: "WIDE2", Ssid: 1}}
+	input := AX25_frame{Dest_addr: dst, Source_addr: src, Digi_path: path, Info_field: "foobar"}.GoString()
+	expect := `      Dest: KK7EWJ
+    Source: N0CALL
   DigiPath: [WIDE1-1 WIDE2-1]
 Info Field: foobar
 `
@@ -142,5 +145,22 @@ Info Field: foobar
 	%v
 	Actual:
 	%v`, expect, input)
+	}
+}
+
+func Test_AX25_frame_TNC2(t *testing.T) {
+	src := Callsign{Call: "KK7EWJ", Ssid: 7}
+	dst := Callsign{Call: "N0CALL", Ssid: 2}
+	result := AX25_frame{Source_addr: src, Dest_addr: dst}.TNC2()
+	expected := "KK7EWJ-7>N0CALL-2"
+	if result != expected {
+		t.Errorf("Expected %s but got %s", expected, result)
+	}
+}
+
+func Test_Callsign_GoString(t *testing.T) {
+	call := Callsign{Call: "KK7EWJ", Ssid: 7}
+	if call.GoString() != "KK7EWJ-7" {
+
 	}
 }
