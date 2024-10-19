@@ -58,6 +58,11 @@ func (frame AX25_frame) TNC2() string {
 
 	for _, digi := range frame.Digi_path {
 		output = output + "," + digi.String()
+		// If last repeater to digipeat, mark it with '*' and break (no addrs should follow the digipeater addr)
+		if digi.IsCmdOrRpt {
+			output = output + "*"
+			break
+		}
 	}
 
 	return output

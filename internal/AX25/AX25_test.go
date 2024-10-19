@@ -160,8 +160,18 @@ Info Field: foobar
 func Test_AX25_frame_TNC2(t *testing.T) {
 	src := Callsign{Call: "KK7EWJ", Ssid: 7}
 	dst := Callsign{Call: "N0CALL", Ssid: 2}
-	result := AX25_frame{Source_addr: src, Dest_addr: dst, Digi_path: []Callsign{{Call: "WIDE2", Ssid: 2}}}.TNC2()
-	expected := "KK7EWJ-7>N0CALL-2,WIDE2-2"
+	result := AX25_frame{Source_addr: src, Dest_addr: dst, Digi_path: []Callsign{{Call: "WIDE2", Ssid: 1}, {Call: "RS0ISS", IsCmdOrRpt: true}}}.TNC2()
+	expected := "KK7EWJ-7>N0CALL-2,WIDE2-1,RS0ISS*"
+	if result != expected {
+		t.Errorf("Expected %s but got %s", expected, result)
+	}
+}
+
+func Test_AX25_frame_TNC2_ignores_digi_path_after_repeated_call(t *testing.T) {
+	src := Callsign{Call: "KK7EWJ", Ssid: 7}
+	dst := Callsign{Call: "N0CALL", Ssid: 2}
+	result := AX25_frame{Source_addr: src, Dest_addr: dst, Digi_path: []Callsign{{Call: "RS0ISS", IsCmdOrRpt: true}, {Call: "WIDE2", Ssid: 1}}}.TNC2()
+	expected := "KK7EWJ-7>N0CALL-2,RS0ISS*"
 	if result != expected {
 		t.Errorf("Expected %s but got %s", expected, result)
 	}
