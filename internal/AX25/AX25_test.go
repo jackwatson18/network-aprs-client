@@ -147,8 +147,8 @@ Info Field: foobar
 func Test_AX25_frame_TNC2(t *testing.T) {
 	src := Callsign{Call: "KK7EWJ", Ssid: 7}
 	dst := Callsign{Call: "N0CALL", Ssid: 2}
-	result := AX25_frame{Source_addr: src, Dest_addr: dst}.TNC2()
-	expected := "KK7EWJ-7>N0CALL-2"
+	result := AX25_frame{Source_addr: src, Dest_addr: dst, Digi_path: []Callsign{{Call: "WIDE2", Ssid: 2}}}.TNC2()
+	expected := "KK7EWJ-7>N0CALL-2,WIDE2-2"
 	if result != expected {
 		t.Errorf("Expected %s but got %s", expected, result)
 	}
@@ -156,7 +156,8 @@ func Test_AX25_frame_TNC2(t *testing.T) {
 
 func Test_Callsign_GoString(t *testing.T) {
 	call := Callsign{Call: "KK7EWJ", Ssid: 7}
-	if call.GoString() != "KK7EWJ-7" {
-
+	expected := "KK7EWJ-7"
+	if call.GoString() != expected {
+		t.Errorf("Expected %s but got %s", expected, call)
 	}
 }

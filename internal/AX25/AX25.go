@@ -54,6 +54,10 @@ func (frame AX25_frame) GoString() string {
 func (frame AX25_frame) TNC2() string {
 	output := fmt.Sprintf("%s>%s", frame.Source_addr, frame.Dest_addr)
 
+	for _, digi := range frame.Digi_path {
+		output = output + "," + digi.String()
+	}
+
 	return output
 }
 
