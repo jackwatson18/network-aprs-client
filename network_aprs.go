@@ -8,7 +8,6 @@ import (
 	"net"
 
 	"github.com/fatih/color"
-	_ "github.com/mattn/go-sqlite3"
 )
 
 func ListenOnlyLoop(server string) {
