@@ -111,6 +111,19 @@ func Test_parseAddr_FailIfTooLong(t *testing.T) {
 	}
 }
 
+func Test_parseAddr_CmdBitSet(t *testing.T) {
+	result, err := parseAddr([]byte{0x96, 0x96, 0x6E, 0x8A, 0xAE, 0x94, 0xEF})
+	expect := Callsign{Call: "KK7EWJ", Ssid: 7, IsCmdOrRpt: true}
+	if err != nil {
+		t.Errorf("Expected no error but got %v", err)
+	}
+
+	if result.IsCmdOrRpt != expect.IsCmdOrRpt {
+		t.Errorf("Expected %v with CMD=%v but got %v with CMD=%v", expect, expect.IsCmdOrRpt, result, result.IsCmdOrRpt)
+
+	}
+}
+
 func Test_parseAddr_CorrectOutput(t *testing.T) {
 	result, err := parseAddr([]byte{0x96, 0x96, 0x6E, 0x8A, 0xAE, 0x94, 0x6F})
 	expect := Callsign{Call: "KK7EWJ", Ssid: 7}

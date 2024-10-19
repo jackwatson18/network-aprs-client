@@ -11,10 +11,12 @@ const FEND byte = 0xc0
 const CONTROL_FIELD byte = 3
 const PROTOCOL_ID byte = 0xf0
 const AX25_SSID_BITMASK byte = 0xf
+const CMD_OR_RPT_BITMASK byte = 0b10000000
 
 type Callsign struct {
-	Call string
-	Ssid uint8
+	Call       string
+	Ssid       uint8
+	IsCmdOrRpt bool
 }
 
 func (callsign Callsign) String() string {
@@ -136,6 +138,10 @@ func parseAddr(addr []byte) (Callsign, error) {
 
 	call := strings.TrimSpace(string(output[0:6]))
 	ssid := uint8(output[6] & AX25_SSID_BITMASK)
+	cmd_or_rpt := false
+	if (addr[6] & CMD_OR_RPT_BITMASK) == CMD_OR_RPT_BITMASK {
+		cmd_or_rpt = true
+	}
 
-	return Callsign{Call: call, Ssid: ssid}, nil
+	return Callsign{Call: call, Ssid: ssid, IsCmdOrRpt: cmd_or_rpt}, nil
 }
