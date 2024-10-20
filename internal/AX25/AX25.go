@@ -1,3 +1,4 @@
+// provides the means for decoding, and eventually encoding AX25 data from a TCP connection.
 package AX25
 
 import (
