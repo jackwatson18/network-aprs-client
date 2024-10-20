@@ -29,14 +29,19 @@ func ListenOnlyLoop(server string) {
 			log.Fatalf("Error reading conn: %s", err)
 		}
 
-		frame_struct, err := AX25.ConvertBytesToAX25(buffer[:mLen])
+		trimmed_bytes, err := AX25.StripKISSWrapper(buffer[:mLen])
+		if err != nil {
+			fmt.Printf("%v\n", err)
+			continue
+		}
+		frame_struct, err := AX25.ConvertBytesToAX25(trimmed_bytes)
 		if err != nil {
 			fmt.Printf("%v\n", err)
 			continue
 		}
 		c := color.New(color.FgGreen).Add(color.Bold)
 		c.Println("New Packet:")
-		fmt.Printf("%v\n", frame_struct.String())
+		fmt.Printf("%v\n", frame_struct.TNC2())
 	}
 }
 

@@ -38,7 +38,7 @@ type AX25_frame struct {
 	Info_field  string
 }
 
-func (frame AX25_frame) String() string {
+func (frame AX25_frame) StructPrint() string {
 	// multiline strings are stupid, ignore the weird formatting.
 	return fmt.Sprintf(
 		`      Dest: %s
@@ -48,22 +48,35 @@ Info Field: %s
 `, frame.Dest_addr, frame.Source_addr, frame.Digi_path, frame.Info_field)
 }
 
+// for Go built-ins that use GoStringer interface. Wraps TNC2 string method
 func (frame AX25_frame) GoString() string {
-	return frame.String()
+	return frame.TNC2()
 }
 
 // Converts AX25 Frame to TNC2 format string output
 func (frame AX25_frame) TNC2() string {
 	output := fmt.Sprintf("%s>%s", frame.Source_addr, frame.Dest_addr)
 
+	// has an address in the digipath repeated this frame?
+	wasRpt := false
 	for _, digi := range frame.Digi_path {
-		output = output + "," + digi.String()
-		// If last repeater to digipeat, mark it with '*' and break (no addrs should follow the digipeater addr)
-		if digi.IsCmdOrRpt {
-			output = output + "*"
+		// if next digi callsign is not repeated, and we've seen repeated, drop it.
+		if wasRpt && !digi.IsCmdOrRpt {
 			break
 		}
+
+		output = output + "," + digi.String()
+
+		if digi.IsCmdOrRpt {
+			wasRpt = true
+		}
 	}
+	if wasRpt {
+		// if we had a digipeater digipeat the frame, mark last visited digi with a star/astrisk
+		output = output + "*"
+	}
+
+	output = output + ":" + frame.Info_field
 
 	return output
 }

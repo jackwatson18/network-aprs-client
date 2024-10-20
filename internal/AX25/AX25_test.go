@@ -137,11 +137,11 @@ func Test_parseAddr_CorrectOutput(t *testing.T) {
 	}
 }
 
-func Test_AX25_frame_String(t *testing.T) {
+func Test_AX25_frame_StructPrint(t *testing.T) {
 	dst := Callsign{Call: "KK7EWJ", Ssid: 0}
 	src := Callsign{Call: "N0CALL", Ssid: 0}
 	path := []Callsign{{Call: "WIDE1", Ssid: 1}, {Call: "WIDE2", Ssid: 1}}
-	input := AX25_frame{Dest_addr: dst, Source_addr: src, Digi_path: path, Info_field: "foobar"}.GoString()
+	input := AX25_frame{Dest_addr: dst, Source_addr: src, Digi_path: path, Info_field: "foobar"}.StructPrint()
 	expect := `      Dest: KK7EWJ
     Source: N0CALL
   DigiPath: [WIDE1-1 WIDE2-1]
@@ -157,11 +157,12 @@ Info Field: foobar
 	}
 }
 
-func Test_AX25_frame_TNC2(t *testing.T) {
+func Test_AX25_frame_TNC2_String(t *testing.T) {
 	src := Callsign{Call: "KK7EWJ", Ssid: 7}
 	dst := Callsign{Call: "N0CALL", Ssid: 2}
-	result := AX25_frame{Source_addr: src, Dest_addr: dst, Digi_path: []Callsign{{Call: "WIDE2", Ssid: 1}, {Call: "RS0ISS", IsCmdOrRpt: true}}}.TNC2()
-	expected := "KK7EWJ-7>N0CALL-2,WIDE2-1,RS0ISS*"
+	digi := []Callsign{{Call: "WIDE2", Ssid: 1}, {Call: "RS0ISS", IsCmdOrRpt: true}}
+	result := AX25_frame{Source_addr: src, Dest_addr: dst, Digi_path: digi, Info_field: "foobartest"}.GoString()
+	expected := "KK7EWJ-7>N0CALL-2,WIDE2-1,RS0ISS*:foobartest"
 	if result != expected {
 		t.Errorf("Expected %s but got %s", expected, result)
 	}
@@ -171,7 +172,18 @@ func Test_AX25_frame_TNC2_ignores_digi_path_after_repeated_call(t *testing.T) {
 	src := Callsign{Call: "KK7EWJ", Ssid: 7}
 	dst := Callsign{Call: "N0CALL", Ssid: 2}
 	result := AX25_frame{Source_addr: src, Dest_addr: dst, Digi_path: []Callsign{{Call: "RS0ISS", IsCmdOrRpt: true}, {Call: "WIDE2", Ssid: 1}}}.TNC2()
-	expected := "KK7EWJ-7>N0CALL-2,RS0ISS*"
+	expected := "KK7EWJ-7>N0CALL-2,RS0ISS*:"
+	if result != expected {
+		t.Errorf("Expected %s but got %s", expected, result)
+	}
+}
+
+func Test_AX25_frame_TNC2_multiple_repeaters_only_star_last_repeater(t *testing.T) {
+	src := Callsign{Call: "KK7EWJ", Ssid: 7}
+	dst := Callsign{Call: "N0CALL", Ssid: 2}
+	digi := []Callsign{{Call: "WIDE1", IsCmdOrRpt: true}, {Call: "UTAH", IsCmdOrRpt: true}}
+	result := AX25_frame{Source_addr: src, Dest_addr: dst, Digi_path: digi}.TNC2()
+	expected := "KK7EWJ-7>N0CALL-2,WIDE1,UTAH*:"
 	if result != expected {
 		t.Errorf("Expected %s but got %s", expected, result)
 	}
