@@ -22,3 +22,5 @@ jobs:
 
     - name: Test
       uses: robherley/go-test-action@v0
+      with:
+        testArguments: ./... internal/AX25
