@@ -11,40 +11,45 @@ import (
 )
 
 // connects to, and listens to a KISS server. Returns a channel. Meant to run as a goroutine.
-func KISSServerConnector(server string, ax25_chan chan AX25.AX25_frame, error_chan chan error) {
+func KISSServerConnector(server string) (chan AX25.AX25_frame, chan error, error) {
+	frame_chan := make(chan AX25.AX25_frame)
+	error_chan := make(chan error)
+
 	conn, err := net.Dial("tcp", server)
 
 	if err != nil {
-		error_chan <- fmt.Errorf("KISSServerConnector: error connecting to modem: %v", err)
-		return
+		return frame_chan, error_chan, fmt.Errorf("KISSServerConnector: %v", err)
 	}
 
-	defer conn.Close()
-	fmt.Printf("KISSServerConnector connected to KISS Server at %s\n", server)
+	// start the connection listener in a goroutine
+	go func() {
+		defer conn.Close()
+		fmt.Printf("KISSServerConnector connected to KISS Server at %s\n", server)
+		buffer := make([]byte, 1024)
+		for {
+			mLen, err := conn.Read(buffer)
 
-	buffer := make([]byte, 1024)
+			if err != nil {
+				error_chan <- fmt.Errorf("KISSServerConnector: error reading conn: %v", err)
+				return
+			}
 
-	for {
-		mLen, err := conn.Read(buffer)
+			trimmed_bytes, err := AX25.StripKISSWrapper(buffer[:mLen])
+			if err != nil {
+				fmt.Printf("%v\n", err)
+				continue
+			}
+			frame_struct, err := AX25.ConvertBytesToAX25(trimmed_bytes)
+			if err != nil {
+				fmt.Printf("%v\n", err)
+				continue
+			}
 
-		if err != nil {
-			error_chan <- fmt.Errorf("KISSServerConnector: error reading conn: %v", err)
-			return
+			frame_chan <- frame_struct
 		}
+	}()
 
-		trimmed_bytes, err := AX25.StripKISSWrapper(buffer[:mLen])
-		if err != nil {
-			fmt.Printf("%v\n", err)
-			continue
-		}
-		frame_struct, err := AX25.ConvertBytesToAX25(trimmed_bytes)
-		if err != nil {
-			fmt.Printf("%v\n", err)
-			continue
-		}
-
-		ax25_chan <- frame_struct
-	}
+	return frame_chan, error_chan, nil
 }
 
 func ListenOnlyLoop(frame_chan chan AX25.AX25_frame, error_chan chan error) error {
@@ -68,12 +73,12 @@ func main() {
 	flag.Parse()
 	fmt.Println(*serverPtr)
 
-	frame_chan := make(chan AX25.AX25_frame)
-	error_chan := make(chan error)
+	frame_chan, err_chan, err := KISSServerConnector(*serverPtr)
+	if err != nil {
+		log.Fatalf("Could not establish KISSServerConnector: %v", err)
+	}
 
-	go KISSServerConnector(*serverPtr, frame_chan, error_chan)
-
-	err := ListenOnlyLoop(frame_chan, error_chan)
+	err = ListenOnlyLoop(frame_chan, err_chan)
 	if err != nil {
 		log.Fatalf("%v", err)
 	}
