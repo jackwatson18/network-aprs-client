@@ -10,15 +10,17 @@ import (
 	"github.com/fatih/color"
 )
 
-func ListenOnlyLoop(server string) {
+// connects to, and listens to a KISS server. Returns a channel. Meant to run as a goroutine.
+func KISSServerConnector(server string, ax25_chan chan AX25.AX25_frame, error_chan chan error) {
 	conn, err := net.Dial("tcp", server)
 
 	if err != nil {
-		log.Fatalf("Error connecting to modem: %s", err)
+		error_chan <- fmt.Errorf("KISSServerConnector: error connecting to modem: %v", err)
+		return
 	}
 
 	defer conn.Close()
-	fmt.Printf("Connected to KISS Server at %s\n", server)
+	fmt.Printf("KISSServerConnector connected to KISS Server at %s\n", server)
 
 	buffer := make([]byte, 1024)
 
@@ -26,7 +28,8 @@ func ListenOnlyLoop(server string) {
 		mLen, err := conn.Read(buffer)
 
 		if err != nil {
-			log.Fatalf("Error reading conn: %s", err)
+			error_chan <- fmt.Errorf("KISSServerConnector: error reading conn: %v", err)
+			return
 		}
 
 		trimmed_bytes, err := AX25.StripKISSWrapper(buffer[:mLen])
@@ -39,9 +42,23 @@ func ListenOnlyLoop(server string) {
 			fmt.Printf("%v\n", err)
 			continue
 		}
-		c := color.New(color.FgGreen).Add(color.Bold)
-		c.Println("New Packet:")
-		fmt.Printf("%v\n", frame_struct.TNC2())
+
+		ax25_chan <- frame_struct
+	}
+}
+
+func ListenOnlyLoop(frame_chan chan AX25.AX25_frame, error_chan chan error) error {
+	c := color.New(color.FgGreen).Add(color.Bold)
+
+	for {
+		select {
+		case err := <-error_chan:
+			return err
+		case ax25_frame := <-frame_chan:
+			c.Println("New Packet:")
+			fmt.Printf("%v\n", ax25_frame.TNC2())
+
+		}
 	}
 }
 
@@ -51,6 +68,14 @@ func main() {
 	flag.Parse()
 	fmt.Println(*serverPtr)
 
-	ListenOnlyLoop(*serverPtr)
+	frame_chan := make(chan AX25.AX25_frame)
+	error_chan := make(chan error)
+
+	go KISSServerConnector(*serverPtr, frame_chan, error_chan)
+
+	err := ListenOnlyLoop(frame_chan, error_chan)
+	if err != nil {
+		log.Fatalf("%v", err)
+	}
 
 }
