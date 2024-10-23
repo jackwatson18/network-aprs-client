@@ -47,3 +47,25 @@ func Test_KISSServerConnector_goodConnection(t *testing.T) {
 	}
 
 }
+
+// func Test_KISServerConnector_various_inputs(t *testing.T) {
+// 	// set up the fake emulator server
+// 	listener, err := net.Listen("tcp", "127.0.0.1:0")
+// 	if err != nil {
+// 		t.Fatal(err)
+// 	}
+// 	listen_addr := listener.Addr().String()
+// 	data_chan := make(chan []byte)
+// 	conn_chan := make(chan net.Conn)
+
+// 	em_done_chan, em_err_chan := KISSServerEmulator(conn_chan, data_chan)
+
+// 	// set up KISSServerConnector
+// 	ax25_chan, kiss_err_chan, err := KISSServerConnector(listen_addr)
+// 	if err != nil {
+// 		t.Fatal(err)
+// 	}
+
+// 	// do stuff
+
+// }
