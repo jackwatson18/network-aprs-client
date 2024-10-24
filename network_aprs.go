@@ -1,7 +1,6 @@
 package main
 
 import (
-	"bytes"
 	"flag"
 	"fmt"
 	"internal/AX25"
@@ -10,50 +9,6 @@ import (
 
 	"github.com/fatih/color"
 )
-
-// emulates a KISS server for testing purposes. Only meant for one connection at a time. Multiple WILL break this.
-func internal_KISSServerEmulator(address string) (string, chan []byte, chan error, error) {
-	listener, err := net.Listen("tcp", address)
-	if err != nil {
-		return "", nil, nil, err
-	}
-
-	input_chan := make(chan []byte)
-	shutdown_chan := make(chan struct{})
-	err_chan := make(chan error)
-
-	go func() {
-		for {
-			conn, err := listener.Accept()
-			if err != nil {
-				select {
-				case <-shutdown_chan:
-					return
-				default:
-					err_chan <- err
-				}
-			}
-
-			go func() {
-				for {
-					data := &bytes.Buffer{}
-					data.Write([]byte{0xc0, 0x0})
-					data.Write(<-input_chan)
-					data.Write([]byte{0xc0})
-
-					_, err := conn.Write(data.Bytes())
-					if err != nil {
-						err_chan <- err
-						return
-					}
-				}
-			}()
-
-		}
-	}()
-
-	return listener.Addr().String(), input_chan, err_chan, nil
-}
 
 // connects to, and listens to a KISS server. Returns a channel. Meant to run as a goroutine.
 func KISSServerConnector(server string) (chan AX25.AX25_frame, chan error, error) {
