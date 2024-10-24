@@ -2,6 +2,7 @@
 package AX25
 
 import (
+	"bytes"
 	"fmt"
 	"os"
 	"strings"
@@ -13,6 +14,8 @@ const CONTROL_FIELD byte = 3
 const PROTOCOL_ID byte = 0xf0
 const AX25_SSID_BITMASK byte = 0xf
 const CMD_OR_RPT_BITMASK byte = 0b10000000
+const AX25_RESERVED_BITS byte = 0b01100000
+const AX25_EXTENTION_BITMASK byte = 0b00000001
 
 type Callsign struct {
 	Call       string
@@ -28,8 +31,18 @@ func (callsign Callsign) String() string {
 	}
 }
 
-func (callsign Callsign) GoString() string {
-	return callsign.String()
+// converts callsign to bytes including appropriate bitshifting and SSID bits
+func (callsign Callsign) AX25Encode(ssid_bitmask byte) []byte {
+	output := make([]byte, 7)
+	for i := 0; i < len(output); i++ {
+		output[i] = ' ' << 1
+	}
+	for i, c := range callsign.Call {
+		output[i] = byte(c) << 1
+	}
+
+	output[6] = (byte(callsign.Ssid) << 1) | ssid_bitmask
+	return output
 }
 
 type AX25_frame struct {
@@ -50,7 +63,7 @@ Info Field: %s
 }
 
 // for Go built-ins that use GoStringer interface. Wraps TNC2 string method
-func (frame AX25_frame) GoString() string {
+func (frame AX25_frame) String() string {
 	return frame.TNC2()
 }
 
@@ -80,6 +93,47 @@ func (frame AX25_frame) TNC2() string {
 	output = output + ":" + frame.Info_field
 
 	return output
+}
+
+// given an AX25_frame, returns a slice of bytes ready for transmission
+func (frame AX25_frame) Bytes(isResponse bool) []byte {
+	// TODO: Handle Command/Response part of AX25 standard...
+	output := &bytes.Buffer{}
+	// write dest callsign
+	mask := AX25_RESERVED_BITS
+	if !isResponse {
+		// if not a response set the CMD bit
+		mask = mask | CMD_OR_RPT_BITMASK
+	}
+	output.Write(frame.Dest_addr.AX25Encode(mask))
+
+	// write the source callsign
+	mask = AX25_RESERVED_BITS
+	// if there are no digi paths, we need to set the extention bit to 1 indicating its the last callsign in the address field
+	if len(frame.Digi_path) == 0 {
+		mask = mask | AX25_EXTENTION_BITMASK
+	}
+	if isResponse {
+		mask = mask | CMD_OR_RPT_BITMASK
+	}
+	output.Write(frame.Source_addr.AX25Encode(mask))
+
+	// write the digipeaters
+	for i, digi := range frame.Digi_path {
+		mask = AX25_RESERVED_BITS
+		if i == len(frame.Digi_path)-1 {
+			// last digipeater
+			mask = mask | AX25_EXTENTION_BITMASK
+		}
+		output.Write(digi.AX25Encode(mask))
+	}
+
+	// write control/protocol bytes
+	output.Write([]byte{CONTROL_FIELD, PROTOCOL_ID})
+	// info field
+	output.Write([]byte(frame.Info_field))
+
+	return output.Bytes()
 }
 
 func readBytesFromFile(filename string) ([]byte, error) {
