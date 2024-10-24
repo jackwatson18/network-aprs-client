@@ -1,6 +1,7 @@
 package main
 
 import (
+	"bytes"
 	"flag"
 	"fmt"
 	"internal/AX25"
@@ -10,38 +11,48 @@ import (
 	"github.com/fatih/color"
 )
 
-// emulates a KISS server for testing purposes
-func KISSServerEmulator(conn_chan chan net.Conn, input_chan chan []byte) (chan bool, chan error) {
-	done_channel := make(chan bool)
-	err_channel := make(chan error)
+// emulates a KISS server for testing purposes. Only meant for one connection at a time. Multiple WILL break this.
+func internal_KISSServerEmulator(address string) (string, chan []byte, chan error, error) {
+	listener, err := net.Listen("tcp", address)
+	if err != nil {
+		return "", nil, nil, err
+	}
 
-	// spin up a goroutine to handle channel inputs
+	input_chan := make(chan []byte)
+	shutdown_chan := make(chan struct{})
+	err_chan := make(chan error)
+
 	go func() {
 		for {
-			select {
-			case <-done_channel:
-				return
-			case conn := <-conn_chan:
-				// spin up a goroutine to send data from the channel to the requestor
-				go func() {
-					for {
-						data, open := <-input_chan
-						if !open {
-							return
-						}
-
-						_, err := conn.Write(data)
-						if err != nil {
-							err_channel <- err
-							return
-						}
-					}
-				}()
+			conn, err := listener.Accept()
+			if err != nil {
+				select {
+				case <-shutdown_chan:
+					return
+				default:
+					err_chan <- err
+				}
 			}
+
+			go func() {
+				for {
+					data := &bytes.Buffer{}
+					data.Write([]byte{0xc0, 0x0})
+					data.Write(<-input_chan)
+					data.Write([]byte{0xc0})
+
+					_, err := conn.Write(data.Bytes())
+					if err != nil {
+						err_chan <- err
+						return
+					}
+				}
+			}()
+
 		}
 	}()
 
-	return done_channel, err_channel
+	return listener.Addr().String(), input_chan, err_chan, nil
 }
 
 // connects to, and listens to a KISS server. Returns a channel. Meant to run as a goroutine.
@@ -71,12 +82,12 @@ func KISSServerConnector(server string) (chan AX25.AX25_frame, chan error, error
 
 			trimmed_bytes, err := AX25.StripKISSWrapper(buffer[:mLen])
 			if err != nil {
-				fmt.Printf("%v\n", err)
+				error_chan <- err
 				continue
 			}
 			frame_struct, err := AX25.ConvertBytesToAX25(trimmed_bytes)
 			if err != nil {
-				fmt.Printf("%v\n", err)
+				error_chan <- err
 				continue
 			}
 

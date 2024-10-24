@@ -1,6 +1,7 @@
 package main
 
 import (
+	"internal/AX25"
 	"net"
 	"testing"
 	"time"
@@ -48,24 +49,30 @@ func Test_KISSServerConnector_goodConnection(t *testing.T) {
 
 }
 
-// func Test_KISServerConnector_various_inputs(t *testing.T) {
-// 	// set up the fake emulator server
-// 	listener, err := net.Listen("tcp", "127.0.0.1:0")
-// 	if err != nil {
-// 		t.Fatal(err)
-// 	}
-// 	listen_addr := listener.Addr().String()
-// 	data_chan := make(chan []byte)
-// 	conn_chan := make(chan net.Conn)
+func Test_KISServerConnector_various_inputs(t *testing.T) {
+	// set up the fake emulator server
+	em_addr, em_input_chan, _, err := internal_KISSServerEmulator("127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
 
-// 	em_done_chan, em_err_chan := KISSServerEmulator(conn_chan, data_chan)
+	connector_out_chan, connector_err_chan, err := KISSServerConnector(em_addr)
+	if err != nil {
+		t.Fatal(err)
+	}
 
-// 	// set up KISSServerConnector
-// 	ax25_chan, kiss_err_chan, err := KISSServerConnector(listen_addr)
-// 	if err != nil {
-// 		t.Fatal(err)
-// 	}
+	test_data1 := AX25.AX25_frame{
+		Dest_addr:   AX25.Callsign{Call: "APZ123"},
+		Source_addr: AX25.Callsign{Call: "KK7EWJ", Ssid: 7},
+		Info_field:  ":TEST     :Hello World!",
+	}.Bytes(false)
+	em_input_chan <- test_data1
 
-// 	// do stuff
+	select {
+	case data := <-connector_out_chan:
+		t.Log(data)
+	case err := <-connector_err_chan:
+		t.Errorf("test: %v", err)
+	}
 
-// }
+}
