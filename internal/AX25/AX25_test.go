@@ -161,7 +161,7 @@ func Test_AX25_frame_TNC2_String(t *testing.T) {
 	src := Callsign{Call: "KK7EWJ", Ssid: 7}
 	dst := Callsign{Call: "N0CALL", Ssid: 2}
 	digi := []Callsign{{Call: "WIDE2", Ssid: 1}, {Call: "RS0ISS", IsCmdOrRpt: true}}
-	result := AX25_frame{Source_addr: src, Dest_addr: dst, Digi_path: digi, Info_field: "foobartest"}.GoString()
+	result := AX25_frame{Source_addr: src, Dest_addr: dst, Digi_path: digi, Info_field: "foobartest"}.String()
 	expected := "KK7EWJ-7>N0CALL-2,WIDE2-1,RS0ISS*:foobartest"
 	if result != expected {
 		t.Errorf("Expected %s but got %s", expected, result)
@@ -192,7 +192,7 @@ func Test_AX25_frame_TNC2_multiple_repeaters_only_star_last_repeater(t *testing.
 func Test_Callsign_GoString(t *testing.T) {
 	call := Callsign{Call: "KK7EWJ", Ssid: 7}
 	expected := "KK7EWJ-7"
-	if call.GoString() != expected {
+	if call.String() != expected {
 		t.Errorf("Expected %s but got %s", expected, call)
 	}
 }

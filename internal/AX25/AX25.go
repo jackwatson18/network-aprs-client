@@ -28,10 +28,6 @@ func (callsign Callsign) String() string {
 	}
 }
 
-func (callsign Callsign) GoString() string {
-	return callsign.String()
-}
-
 type AX25_frame struct {
 	Dest_addr   Callsign
 	Source_addr Callsign
@@ -49,8 +45,8 @@ Info Field: %s
 `, frame.Dest_addr, frame.Source_addr, frame.Digi_path, frame.Info_field)
 }
 
-// for Go built-ins that use GoStringer interface. Wraps TNC2 string method
-func (frame AX25_frame) GoString() string {
+// Wraps TNC2 string method
+func (frame AX25_frame) String() string {
 	return frame.TNC2()
 }
 
