@@ -10,38 +10,64 @@ import (
 	"github.com/fatih/color"
 )
 
-func ListenOnlyLoop(server string) {
+func ListenOnlyKISS(server string) (<-chan string, <-chan error, error) {
 	conn, err := net.Dial("tcp", server)
-
 	if err != nil {
-		log.Fatalf("Error connecting to modem: %s", err)
+		return nil, nil, fmt.Errorf("error connecting to modem: %w", err)
 	}
 
-	defer conn.Close()
-	fmt.Printf("Connected to KISS Server at %s\n", server)
+	tnc2_out := make(chan string)
+	err_out := make(chan error)
 
-	buffer := make([]byte, 1024)
+	go func() {
+		defer conn.Close()
+		defer close(tnc2_out)
+		defer close(err_out)
+		buffer := make([]byte, 1024)
 
+		for {
+			mLen, err := conn.Read(buffer)
+
+			if err != nil {
+				err_out <- fmt.Errorf("error reading conn: %s", err)
+				break
+			}
+
+			trimmed_bytes, err := AX25.StripKISSWrapper(buffer[:mLen])
+			if err != nil {
+				err_out <- fmt.Errorf("%v", err)
+				continue
+			}
+			frame_struct, err := AX25.ConvertBytesToAX25(trimmed_bytes)
+			if err != nil {
+				err_out <- fmt.Errorf("%v", err)
+				continue
+			}
+
+			tnc2_out <- fmt.Sprintf("%v\n", frame_struct.TNC2())
+		}
+	}()
+
+	return tnc2_out, err_out, nil
+}
+
+func ConsolePrinter(str <-chan string, err <-chan error) {
 	for {
-		mLen, err := conn.Read(buffer)
+		select {
+		case err, ok := <-err:
+			if !ok {
+				return
+			}
+			c := color.New(color.FgRed).Add(color.Bold)
+			c.Printf("%s\n", err)
 
-		if err != nil {
-			log.Fatalf("Error reading conn: %s", err)
+		case tnc2, ok := <-str:
+			if !ok {
+				return
+			}
+			c := color.New(color.FgGreen).Add(color.Bold)
+			c.Printf("%s\n", tnc2)
 		}
-
-		trimmed_bytes, err := AX25.StripKISSWrapper(buffer[:mLen])
-		if err != nil {
-			fmt.Printf("%v\n", err)
-			continue
-		}
-		frame_struct, err := AX25.ConvertBytesToAX25(trimmed_bytes)
-		if err != nil {
-			fmt.Printf("%v\n", err)
-			continue
-		}
-		c := color.New(color.FgGreen).Add(color.Bold)
-		c.Println("New Packet:")
-		fmt.Printf("%v\n", frame_struct.TNC2())
 	}
 }
 
@@ -51,6 +77,11 @@ func main() {
 	flag.Parse()
 	fmt.Println(*serverPtr)
 
-	ListenOnlyLoop(*serverPtr)
+	tnc2_out, err_out, err := ListenOnlyKISS(*serverPtr)
+	if err != nil {
+		log.Fatalf("Failed to connect to server: %s", err)
+	}
+
+	ConsolePrinter(tnc2_out, err_out)
 
 }
