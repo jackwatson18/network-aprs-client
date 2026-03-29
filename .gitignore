@@ -1,3 +1,5 @@
 *.db
 *.db-journal
 network-aprs-client
+.scannerwork
+sonar-project.properties
